@@ -1,0 +1,215 @@
+---
+title: "Math 42 Project"
+author: "Gavin Mora"
+date: "2025-12-05"
+output: pdf_document
+---
+
+```{r}
+library(ggplot2)
+library(dplyr)
+library(tidyr)
+```
+
+
+### Setup
+```{r}
+individuals <- 100
+n_states <- 5
+max_tsteps <- 20
+
+# All individuals start in stage 3
+ind_states <- rep(3, individuals)
+
+# Store state history
+stage_history <- matrix(NA, nrow = max_tsteps, ncol = individuals)
+stage_history[1, ] <- ind_states
+```
+
+
+### Event Probabilities (This is where you tweak parameters)
+```{r}
+# Example event probabilities
+ind_event_probs <- list(
+  # negatives
+  short_illness = 0.05,  # go down by 1
+  death_of_familiar = 0.0005,  # jump to stage 1
+  ended_relationship = 0.001,  # go down by 2
+  unemployment = 0.001,   # go down by 3
+  
+  # positives
+  career_advancement = 0.05,  # go up by 1
+  new_friend = 0.1,  # go up by 2
+  personal_goal = 0.15  # go up by 1
+)
+
+global_event_probs <- list(
+  natural_disaster = 0.002  # go down by 2
+)
+# You can add more and adjust transitions below.
+```
+
+
+### Transitions for each Event
+```{r}
+apply_global_event <- function(states, event){
+  if(event == "natural_disaster"){
+    # Go down by 2 but not below 1
+    return(pmax(states - 2, 1))
+  }
+  
+  stop("Unknown global event")
+}
+
+apply_ind_event <- function(current_state, event) {
+  
+  if (event == "short_illness") {
+    # Go down by 1 stages but not below 1
+    return(max(current_state - 1, 1))
+  }
+  
+  if (event == "death_of_familiar") {
+    # Jump to stage 1
+    return(1)
+  }
+  
+  if (event == "ended_relationship") {
+    # Go down by 2 stages but not below 1
+    return(max(current_state - 2, 1))
+  }
+  
+  if (event == "unemployment") {
+    # Go down by 3 stages but not below 1
+    return(max(current_state - 3, 1))
+  }
+  
+  if (event == "career_advancement") {
+    # Go up by 1 stage but not above 5
+    return(min(current_state + 1, 5))
+  }
+  
+  if (event == "new_friend") {
+    # Go up by 1 stage but not above 5
+    return(min(current_state + 1, 5))
+  }
+  
+  if (event == "personal_goal") {
+    # Go up by 1 stage but not above 5
+    return(min(current_state + 1, 5))
+  }
+  
+  stop("Unknown individual event")
+}
+```
+
+
+### Run Simulation
+```{r}
+for (t in 2:max_tsteps) {
+  
+  for(gev in names(global_event_probs)){
+    if(runif(1) < global_event_probs[[gev]]){
+      ind_states <- apply_global_event(ind_states, gev)
+    }
+  }
+  
+  for (i in 1:individuals) {
+    for(ev in names(ind_event_probs)){
+      if(runif(1) < ind_event_probs[[ev]]){
+        ind_states[i] <- apply_ind_event(ind_states[i], ev)
+      }
+    }
+  }
+  
+  stage_history[t, ] <- ind_states
+}
+```
+
+
+### Prep for GGPlot
+```{r}
+history_df <- as.data.frame(stage_history)
+colnames(history_df) <- paste0("Ind_", 1:individuals)
+history_df$Time <- 1:max_tsteps
+
+plot_df <- history_df %>%
+  pivot_longer(cols = starts_with("Ind_"),
+               names_to = "Individual",
+               values_to = "Stage")
+```
+
+### Plot
+```{r}
+t_target <- 10
+
+### 1. Create stacking index (one stack per stage)
+plot_stacked <- plot_df %>%
+  group_by(Time, Stage) %>%
+  mutate(Stack = row_number()) %>%
+  ungroup()
+
+### 2. Filter for the chosen time step
+plot_single <- plot_stacked %>%
+  filter(Time == t_target)
+
+### 3. Plot the stacked dots
+ggplot(plot_single, aes(x = factor(Stage), y = Stack)) +
+  geom_point(color = "black", size = 3) +
+  scale_x_discrete(drop = FALSE) +
+  scale_y_continuous(limits = c(0.5, max(plot_single$Stack) + 0.5)) +
+  labs(
+    title = paste("Stacked Dot Plot for Time =", t_target),
+    x = "Stage",
+    y = ""
+  ) +
+  theme_minimal() +
+  theme(
+    plot.title = element_text(size = 16, face = "bold"),
+    legend.position = "none"
+  )
+
+```
+
+### Transition Matrix
+```{r}
+# Initialize a 5x5 matrix
+trans_mat <- matrix(0, nrow = n_states, ncol = n_states)
+
+# Loop over time steps and individuals
+for (t in 1:(max_tsteps - 1)) {
+  for (i in 1:individuals) {
+    from <- stage_history[t, i]
+    to   <- stage_history[t + 1, i]
+    trans_mat[from, to] <- trans_mat[from, to] + 1
+  }
+}
+
+# Convert counts to probabilities (row sums = 1)
+trans_mat <- trans_mat / rowSums(trans_mat)
+
+# Optional: add row/col names
+rownames(trans_mat) <- paste0("Stage_", 1:n_states)
+colnames(trans_mat) <- paste0("Stage_", 1:n_states)
+
+trans_mat
+```
+
+### Transiton Matrix Plot
+```{r}
+library(reshape2)
+library(ggplot2)
+
+trans_df <- melt(trans_mat)
+colnames(trans_df) <- c("From", "To", "Probability")
+
+ggplot(trans_df, aes(x = From, y = To, fill = Probability)) +
+  geom_tile() +
+  geom_text(aes(label = round(Probability, 2))) +
+  scale_fill_gradient(low = "white", high = "steelblue") +
+  labs(title = "Transition Matrix") +
+  theme_minimal()
+```
+
+
+
+
