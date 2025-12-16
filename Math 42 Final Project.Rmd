@@ -14,9 +14,11 @@ library(tidyr)
 
 ### Setup
 ```{r}
-individuals <- 100
+set.seed(42)
+
+individuals <- 20
 n_states <- 5
-max_tsteps <- 20
+max_tsteps <- 104
 
 # All individuals start in stage 3
 ind_states <- rep(3, individuals)
@@ -26,6 +28,19 @@ stage_history <- matrix(NA, nrow = max_tsteps, ncol = individuals)
 stage_history[1, ] <- ind_states
 ```
 
+### Friendship Levels
+```{r}
+# Randomly assign levels of friendship (0 to 3) between every pair of individuals
+friendship_probs <- c('0' = 0.8, '1' = 0.12, '2' = 0.06, '3' = 0.02) # probabilities of friendship levels
+
+# Create a 20x20 matrix storing these random levels of friendships
+friendship_levels <- matrix(NA_integer_, individuals, individuals)
+friendship_levels[upper.tri(friendship_levels)] <- sample(0:3, sum(upper.tri(friendship_levels)),
+                                                          replace = TRUE, prob = friendship_probs)
+friendship_levels[lower.tri(friendship_levels)] <- t(friendship_levels)[lower.tri(friendship_levels)]
+
+diag(friendship_levels) <- 0 # relationships with oneself are set to 0
+```
 
 ### Event Probabilities (This is where you tweak parameters)
 ```{r}
@@ -33,18 +48,23 @@ stage_history[1, ] <- ind_states
 ind_event_probs <- list(
   # negatives
   short_illness = 0.05,  # go down by 1
-  death_of_familiar = 0.0005,  # jump to stage 1
-  ended_relationship = 0.001,  # go down by 2
-  unemployment = 0.001,   # go down by 3
-  
+  serious_illness = 0.005,   # go down by 3
+  unenjoyable_activity = 0.1, # go down by 1
+  death_of_familiar = 0.005,  # jump to stage 1
+  relationship_conflicts = 0.05,  # go down by 2
+  financial_insecurity = 0.01, # go down by 2
+  unemployment = 0.005,   # go down by 3
+    
   # positives
   career_advancement = 0.05,  # go up by 1
-  new_friend = 0.1,  # go up by 2
-  personal_goal = 0.15  # go up by 1
+  enjoyable_activity = 0.1,  # go up by 1
+  personal_goal = 0.15,  # go up by 1
+  relationship_renewal = 0.01 # go up by 2
 )
 
 global_event_probs <- list(
-  natural_disaster = 0.002  # go down by 2
+  natural_disaster = 0.01,  # go down by 2
+  economic_downturn = 0.02  # go down by 1
 )
 # You can add more and adjust transitions below.
 ```
@@ -53,9 +73,15 @@ global_event_probs <- list(
 ### Transitions for each Event
 ```{r}
 apply_global_event <- function(states, event){
-  if(event == "natural_disaster"){
-    # Go down by 2 but not below 1
+
+  if (event == "natural_disaster"){
+    # Go down by 3 stages but not below 1
     return(pmax(states - 2, 1))
+  }
+  
+  if (event == "economic_downturn"){
+    # Go down by 1 stage but not below 1
+    return(pmax(states - 1, 1))
   }
   
   stop("Unknown global event")
@@ -64,7 +90,12 @@ apply_global_event <- function(states, event){
 apply_ind_event <- function(current_state, event) {
   
   if (event == "short_illness") {
-    # Go down by 1 stages but not below 1
+    # Go down by 1 stage but not below 1
+    return(max(current_state - 1, 1))
+  }
+  
+  if (event == "unenjoyable_activity") {
+    # Go down by 1 stage but not below 1
     return(max(current_state - 1, 1))
   }
   
@@ -73,12 +104,22 @@ apply_ind_event <- function(current_state, event) {
     return(1)
   }
   
-  if (event == "ended_relationship") {
+  if (event == "relationship_conflicts") {
     # Go down by 2 stages but not below 1
     return(max(current_state - 2, 1))
   }
   
+  if (event == "financial_insecurity") {
+    # Go down by 2 stages but not below 1
+    return(max(current_state - 2, 1))
+  }  
+  
   if (event == "unemployment") {
+    # Go down by 3 stages but not below 1
+    return(max(current_state - 3, 1))
+  }
+  
+  if (event == "serious_illness") {
     # Go down by 3 stages but not below 1
     return(max(current_state - 3, 1))
   }
@@ -88,7 +129,7 @@ apply_ind_event <- function(current_state, event) {
     return(min(current_state + 1, 5))
   }
   
-  if (event == "new_friend") {
+  if (event == "enjoyable_activity") {
     # Go up by 1 stage but not above 5
     return(min(current_state + 1, 5))
   }
@@ -96,6 +137,11 @@ apply_ind_event <- function(current_state, event) {
   if (event == "personal_goal") {
     # Go up by 1 stage but not above 5
     return(min(current_state + 1, 5))
+  }
+  
+  if (event == "relationship_renewal") {
+    # Go up by 2 stages but not above 5
+    return(min(current_state + 2, 5))
   }
   
   stop("Unknown individual event")
@@ -107,17 +153,36 @@ apply_ind_event <- function(current_state, event) {
 ```{r}
 for (t in 2:max_tsteps) {
   
-  for(gev in names(global_event_probs)){
-    if(runif(1) < global_event_probs[[gev]]){
+  # Simulate global events
+  for (gev in names(global_event_probs)) {
+    if (runif(1) < global_event_probs[[gev]]) {
       ind_states <- apply_global_event(ind_states, gev)
     }
   }
   
   for (i in 1:individuals) {
-    for(ev in names(ind_event_probs)){
-      if(runif(1) < ind_event_probs[[ev]]){
+    # Simulate individual events
+    for (ev in names(ind_event_probs)) {
+      if (runif(1) < ind_event_probs[[ev]]) {
         ind_states[i] <- apply_ind_event(ind_states[i], ev)
       }
+    }
+    # Simulate friends influencing happiness of other friends
+    friends_happiness <- 0 # weighted sum depending on friendship level
+    total_weight <- 0
+    for (j in 1:individuals) {
+      if (friendship_levels[i, j] != 0) {
+        # Add each friends' effect on happiness depending on friendship level & their happiness last week
+        friends_happiness <- friends_happiness + (friendship_levels[i, j]^2 * stage_history[t-1, j])
+        total_weight <- total_weight + (friendship_levels[i, j]^2)
+      }
+    }
+    # Check first if current subject has any friends
+    if (total_weight != 0) {
+      fh_weighted_avg <- friends_happiness / total_weight
+      friend_influence <- min(total_weight / 50, 1)
+      ind_states[i] <- min(max(round(((1 - friend_influence) * ind_states[i]) +
+                                       (friend_influence * fh_weighted_avg)), 1), 5)
     }
   }
   
@@ -210,6 +275,25 @@ ggplot(trans_df, aes(x = From, y = To, fill = Probability)) +
   theme_minimal()
 ```
 
+```{r}
+# Compute population mean happiness at each week
+history_df["population_mean"] <- rowMeans(history_df[, 1:individuals])
 
+# I tried plotting all individuals' happiness trajectories over time too, but the plot looks bad
+# history_df_long <- history_df %>% pivot_longer(
+#   cols = c(names(history_df[, names(history_df) != "Time"])),
+#   names_to = "series",
+#   values_to = "happiness"
+# )
 
-
+# Plots population mean happiness levels over time
+ggplot(history_df, aes(x = Time, y = population_mean)) +
+  geom_line() +
+  labs(
+    x = "Time (Weeks)",
+    y = "Population Mean Happiness",
+    title = "Population Mean Happiness Over Two Years"
+  ) +
+  theme_minimal() +
+  coord_cartesian(xlim = c(1, max_tsteps), ylim = c(1.5, 4.5))
+```
