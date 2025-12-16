@@ -1,6 +1,6 @@
 ---
 title: "Math 42 Project"
-author: "Gavin Mora"
+author: "Gavin Mora & Ian Kim"
 date: "2025-12-05"
 output: pdf_document
 ---
