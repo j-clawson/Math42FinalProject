@@ -7,6 +7,7 @@ output: pdf_document
 
 ```{r}
 library(ggplot2)
+library(reshape2)
 library(dplyr)
 library(tidyr)
 ```
@@ -18,7 +19,7 @@ set.seed(42)
 
 individuals <- 20
 n_states <- 5
-max_tsteps <- 104
+max_tsteps <- 260
 
 # All individuals start in stage 3
 ind_states <- rep(3, individuals)
@@ -28,7 +29,7 @@ stage_history <- matrix(NA, nrow = max_tsteps, ncol = individuals)
 stage_history[1, ] <- ind_states
 ```
 
-### Friendship Levels
+### Friendship Levels Matrix
 ```{r}
 # Randomly assign levels of friendship (0 to 3) between every pair of individuals
 friendship_probs <- c('0' = 0.8, '1' = 0.12, '2' = 0.06, '3' = 0.02) # probabilities of friendship levels
@@ -39,7 +40,20 @@ friendship_levels[upper.tri(friendship_levels)] <- sample(0:3, sum(upper.tri(fri
                                                           replace = TRUE, prob = friendship_probs)
 friendship_levels[lower.tri(friendship_levels)] <- t(friendship_levels)[lower.tri(friendship_levels)]
 
-diag(friendship_levels) <- 0 # relationships with oneself are set to 0
+diag(friendship_levels) <- NA # relationships with oneself are set to NA
+```
+
+### Friendship Levels Matrix Plot
+```{r}
+friendship_df <- melt(friendship_levels)
+colnames(friendship_df) <- c("From_Individual", "To_Individual", "Friendship_Level")
+
+ggplot(friendship_df, aes(x = From_Individual, y = To_Individual, fill = Friendship_Level)) +
+  geom_tile() +
+  geom_text(aes(label = Friendship_Level)) +
+  scale_fill_gradient(low = "white", high = "steelblue") +
+  labs(title = "Friendship Levels Between Each Pair of Individuals") +
+  theme_minimal()
 ```
 
 ### Event Probabilities (This is where you tweak parameters)
@@ -49,7 +63,7 @@ ind_event_probs <- list(
   # negatives
   short_illness = 0.05,  # go down by 1
   serious_illness = 0.005,   # go down by 3
-  unenjoyable_activity = 0.1, # go down by 1
+  unenjoyable_activity = 0.15, # go down by 1
   death_of_familiar = 0.005,  # jump to stage 1
   relationship_conflicts = 0.05,  # go down by 2
   financial_insecurity = 0.01, # go down by 2
@@ -69,8 +83,7 @@ global_event_probs <- list(
 # You can add more and adjust transitions below.
 ```
 
-
-### Transitions for each Event
+### Transitions for Each Event
 ```{r}
 apply_global_event <- function(states, event){
 
@@ -171,7 +184,7 @@ for (t in 2:max_tsteps) {
     friends_happiness <- 0 # weighted sum depending on friendship level
     total_weight <- 0
     for (j in 1:individuals) {
-      if (friendship_levels[i, j] != 0) {
+      if (!is.na(friendship_levels[i, j]) & friendship_levels[i, j] != 0) {
         # Add each friends' effect on happiness depending on friendship level & their happiness last week
         friends_happiness <- friends_happiness + (friendship_levels[i, j]^2 * stage_history[t-1, j])
         total_weight <- total_weight + (friendship_levels[i, j]^2)
@@ -205,7 +218,7 @@ plot_df <- history_df %>%
 
 ### Plot
 ```{r}
-t_target <- 10
+t_target <- max_tsteps
 
 ### 1. Create stacking index (one stack per stage)
 plot_stacked <- plot_df %>%
@@ -261,9 +274,6 @@ trans_mat
 
 ### Transiton Matrix Plot
 ```{r}
-library(reshape2)
-library(ggplot2)
-
 trans_df <- melt(trans_mat)
 colnames(trans_df) <- c("From", "To", "Probability")
 
@@ -292,7 +302,7 @@ ggplot(history_df, aes(x = Time, y = population_mean)) +
   labs(
     x = "Time (Weeks)",
     y = "Population Mean Happiness",
-    title = "Population Mean Happiness Over Two Years"
+    title = paste("Population Mean of Happiness Levels Over", max_tsteps / 52, "Years")
   ) +
   theme_minimal() +
   coord_cartesian(xlim = c(1, max_tsteps), ylim = c(1.5, 4.5))
